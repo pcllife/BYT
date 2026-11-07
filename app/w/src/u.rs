@@ -1,3 +1,4 @@
+use crate::t;
 use byt_bg as b;
 use byt_db::{self as d, A, H, R, S, Z};
 use rusqlite::Connection;
@@ -42,6 +43,7 @@ enum I {
     Sel(usize),
     Dir(usize),
 }
+#[doc = "# ui - reuse the buffer, no redraw spin"]
 struct C {
     dc: HDC,
     bm: HBITMAP,
@@ -110,6 +112,10 @@ struct U {
     fs: String,
     hb: u64,
     au: bool,
+    tr: Option<t::T>,
+    hid: bool,
+    tt: u32,
+    er: Option<String>,
 }
 fn wz(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
@@ -388,6 +394,10 @@ impl U {
             fs: String::new(),
             hb: 0,
             au: auto_get(),
+            tr: None,
+            hid: false,
+            tt: 0,
+            er: None,
         };
         u.load(true)?;
         Ok(u)
@@ -779,11 +789,11 @@ impl U {
                     self.au = !self.au;
                 }
                 I::Bg => {
-                    DestroyWindow(h);
+                    PostMessageW(h, WM_CLOSE, 0, 0);
                 }
                 I::Quit => {
                     d::kv(&self.c, "stop", "1")?;
-                    DestroyWindow(h);
+                    PostMessageW(h, t::Q, 0, 0);
                 }
                 I::Export => {
                     if let Some(p) = pick(h, true) {
@@ -871,17 +881,118 @@ unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
             let cs = &*(l as *const CREATESTRUCTW);
             SetWindowLongPtrW(h, GWLP_USERDATA, cs.lpCreateParams as isize);
         }
+        if m == t::Q {
+            DestroyWindow(h);
+            return 0;
+        }
+        if m == t::M && matches!(l as u32 & 0xffff, WM_CONTEXTMENU | WM_RBUTTONUP) {
+            let id = t::menu(h);
+            if id != 0 {
+                PostMessageW(h, WM_COMMAND, id as usize, 0);
+            }
+            return 0;
+        }
         let p = GetWindowLongPtrW(h, GWLP_USERDATA) as *mut U;
         if !p.is_null() {
             let u = &mut *p;
+            if u.tr.as_ref().is_some_and(|t| t.msg != 0 && t.msg == m) {
+                let ok = u.tr.as_mut().is_some_and(t::T::add);
+                if !ok && u.hid {
+                    u.hid = false;
+                    SetTimer(h, 1, 2000, None);
+                    ShowWindow(h, SW_SHOWNA);
+                }
+                return 0;
+            }
             match m {
                 WM_CREATE => {
+                    u.tr = Some(t::T::new(h));
                     SetTimer(h, 1, 2000, None);
+                    return 0;
+                }
+                WM_CLOSE => {
+                    let ok = u.tr.as_mut().is_some_and(t::T::ready);
+                    if ok {
+                        KillTimer(h, 1);
+                        u.hid = true;
+                        u.cv = C::new();
+                        ShowWindow(h, SW_HIDE);
+                    } else {
+                        ShowWindow(h, SW_MINIMIZE);
+                    }
+                    return 0;
+                }
+                t::M => {
+                    if matches!(
+                        l as u32 & 0xffff,
+                        NIN_SELECT | 0x401 | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+                    ) {
+                        u.hid = false;
+                        let _ = u.load(true);
+                        SetTimer(h, 1, 2000, None);
+                        InvalidateRect(h, null(), 0);
+                        ShowWindow(h, SW_RESTORE);
+                        SetForegroundWindow(h);
+                    }
+                    return 0;
+                }
+                WM_COMMAND => {
+                    match w as u32 & 0xffff {
+                        t::OPEN => {
+                            PostMessageW(h, t::M, 0, NIN_SELECT as isize);
+                        }
+                        t::HIDE => {
+                            PostMessageW(h, WM_CLOSE, 0, 0);
+                        }
+                        t::QUIT => {
+                            if let Err(e) = u.act(h, I::Quit) {
+                                msg(h, &e.to_string());
+                            }
+                        }
+                        _ => {}
+                    }
                     return 0;
                 }
                 WM_TIMER => {
                     if w == 2 {
-                        DestroyWindow(h);
+                        match u.tt {
+                            0 => {
+                                u.tt = 1;
+                                ShowWindow(h, SW_SHOWMINNOACTIVE);
+                                PostMessageW(h, WM_CLOSE, 0, 0);
+                            }
+                            1 => {
+                                let ok = u.tr.as_ref().is_some_and(|t| t.ok);
+                                if ok && (!u.hid || IsWindowVisible(h) != 0) {
+                                    u.er = Some("TRAY HIDE".into());
+                                }
+                                u.tt = 2;
+                                PostMessageW(h, t::M, 0, NIN_SELECT as isize);
+                            }
+                            2 => {
+                                if IsWindowVisible(h) == 0 || u.hid {
+                                    u.er = Some("TRAY OPEN".into());
+                                }
+                                u.tt = 3;
+                                PostMessageW(h, WM_CLOSE, 0, 0);
+                            }
+                            _ => {
+                                let ok = u.tr.as_ref().is_some_and(|t| t.ok);
+                                if ok && (!u.hid || IsWindowVisible(h) != 0) {
+                                    u.er = Some("TRAY CLOSE".into());
+                                }
+                                let text = if let Some(e) = &u.er {
+                                    e.as_str()
+                                } else if ok {
+                                    "ok"
+                                } else {
+                                    "no-shell"
+                                };
+                                let _ = std::fs::write(u.p.join("ui.txt"), text);
+                                KillTimer(h, 2);
+                                PostMessageW(h, t::Q, 0, 0);
+                            }
+                        }
                         return 0;
                     }
                     match u.load(false) {
@@ -965,6 +1076,8 @@ unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                     return 0;
                 }
                 WM_DESTROY => {
+                    u.tr.take();
+                    KillTimer(h, 2);
                     KillTimer(h, 1);
                     PostQuitMessage(0);
                     return 0;
@@ -976,6 +1089,10 @@ unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     }
 }
 pub fn run(p: &Path) -> R<()> {
+    let (_lock, cls, old) = t::one(p)?;
+    if old {
+        return t::wake(&cls);
+    }
     unsafe {
         SetProcessDPIAware();
         CoInitializeEx(null(), COINIT_APARTMENTTHREADED as u32);
@@ -985,19 +1102,19 @@ pub fn run(p: &Path) -> R<()> {
             b::spawn(p)?;
         }
         let ins = GetModuleHandleW(null());
-        let cls = w!("BYT_UI");
+
         let wc = WNDCLASSW {
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wp),
             hInstance: ins,
-            lpszClassName: cls,
+            lpszClassName: cls.as_ptr(),
             hCursor: LoadCursorW(null_mut(), IDC_ARROW),
             ..Default::default()
         };
         RegisterClassW(&wc);
         let h = CreateWindowExW(
             0,
-            cls,
+            cls.as_ptr(),
             w!("BYT"),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
             CW_USEDEFAULT,
@@ -1013,7 +1130,7 @@ pub fn run(p: &Path) -> R<()> {
             return Err(format!("WIN {}", GetLastError()).into());
         }
         if smoke {
-            SetTimer(h, 2, 3500, None);
+            SetTimer(h, 2, 450, None);
         }
         let corner = 1u32;
         windows_sys::Win32::Graphics::Dwm::DwmSetWindowAttribute(
@@ -1027,13 +1144,18 @@ pub fn run(p: &Path) -> R<()> {
             TranslateMessage(&m);
             DispatchMessageW(&m);
         }
+        let er = u.er.take();
         drop(u);
         CoUninitialize();
-        Ok(())
+        if let Some(e) = er {
+            Err(e.into())
+        } else {
+            Ok(())
+        }
     }
 }
 #[cfg(test)]
-mod t {
+mod ut {
     #[test]
     fn fmt() {
         assert_eq!(super::byt(1024.), "1.00 KiB");

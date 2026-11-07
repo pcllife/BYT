@@ -1,6 +1,7 @@
 pub use byt_k::*;
 use rusqlite::{Connection, params};
 use std::{path::Path, time::Duration};
+#[doc = "# db - batch the writes and move on"]
 pub fn open(p: &Path) -> R<Connection> {
     std::fs::create_dir_all(p)?;
     let c = Connection::open(p.join("d.db"))?;

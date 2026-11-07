@@ -1,4 +1,4 @@
-# CK
+# ck - run the lot before a push
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
 function c($a) {
@@ -24,6 +24,9 @@ try {
     xr "--data `"$p`" --add `"$e`" --dir `"$p\files`""
     $b = Start-Process -FilePath $e -ArgumentList "--data `"$p`" --bg --ticks 4" -WindowStyle Hidden -PassThru
     xr "--data `"$p`" --ui-test"
+    $ui = (Get-Content -LiteralPath (Join-Path $p 'ui.txt') -Raw).Trim()
+    if ($ui -notin @('ok','no-shell')) { throw ('tray ' + $ui) }
+    if ($b.HasExited) { throw 'bg stopped with ui' }
     if (!$b.WaitForExit(20000)) { throw 'bg timeout' }
     if ($b.ExitCode -ne 0) { throw 'bg exit' }
     xr "--data `"$p`" --ck"
@@ -31,7 +34,7 @@ try {
     $s = Get-Content -LiteralPath (Join-Path $p 'out.json') -Encoding UTF8 -Raw | ConvertFrom-Json
     if ($s.apps.Count -ne 1 -or !$s.apps[0].z.ok -or $s.apps[0].s.ms -lt 1000) { throw 'snapshot' }
     if (Test-Path -LiteralPath (Join-Path $p 'err.txt')) { throw 'err.txt' }
-    Write-Host ('smoke ok; net=' + $s.net + '; gpu=' + $s.gpu)
+    Write-Host ('smoke ok; net=' + $s.net + '; gpu=' + $s.gpu + '; tray=' + $ui)
 } finally {
     if ($b -and !$b.HasExited) { $b.Kill(); $b.WaitForExit() }
     $q = [IO.Path]::GetFullPath($p)

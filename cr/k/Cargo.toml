@@ -10,3 +10,8 @@ path = "src/l.rs"
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
+
+[[bench]]
+name = "bm"
+path = "ben/bm.rs"
+harness = false

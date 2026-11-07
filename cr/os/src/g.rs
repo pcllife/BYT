@@ -1,7 +1,5 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ptr::null_mut,
-};
+use byt_k::a;
+use std::{collections::HashMap, ptr::null_mut};
 use windows_sys::Win32::System::Performance::*;
 
 pub struct G {
@@ -11,7 +9,7 @@ pub struct G {
     warm: bool,
     pub err: u32,
 }
-pub type M = HashMap<u32, Vec<(String, f64)>>;
+pub type M = HashMap<i64, f64>;
 impl Default for G {
     fn default() -> Self {
         Self::new()
@@ -86,7 +84,7 @@ impl G {
         if self.err != 0 {
             return None;
         }
-        let mut out = M::new();
+        let mut es: HashMap<(i64, &[u16]), f64> = HashMap::new();
         let items = unsafe {
             std::slice::from_raw_parts(
                 self.b.as_ptr().cast::<PDH_FMT_COUNTERVALUE_ITEM_W>(),
@@ -97,32 +95,27 @@ impl G {
             if it.FmtValue.CStatus > 1 || it.szName.is_null() {
                 continue;
             }
-            let mut n = 0;
-            unsafe {
-                while *it.szName.add(n) != 0 && n < 4096 {
-                    n += 1;
-                }
-            }
-            let nm = unsafe { String::from_utf16_lossy(std::slice::from_raw_parts(it.szName, n)) };
-            let Some(rest) = nm.strip_prefix("pid_") else {
-                continue;
-            };
-            let Some((pid, key)) = rest.split_once('_') else {
-                continue;
-            };
-            let Ok(pid) = pid.parse::<u32>() else {
-                continue;
-            };
-            if !ids.contains_key(&pid) {
+            let start = it.szName as usize;
+            let end = self.b.as_ptr() as usize + sz as usize;
+            if start < self.b.as_ptr() as usize || start >= end || !start.is_multiple_of(2) {
                 continue;
             }
+            let name = unsafe { std::slice::from_raw_parts(it.szName, (end - start) / 2) };
+            let Some((pid, k)) = a::i(name) else {
+                continue;
+            };
+            let Some(app) = ids.get(&pid).copied() else {
+                continue;
+            };
+            let key = &name[k..];
+            let n = a::w(key);
             let v = unsafe { it.FmtValue.Anonymous.doubleValue };
             if v.is_finite() {
-                out.entry(pid)
-                    .or_default()
-                    .push((key.to_string(), v.max(0.)));
+                *es.entry((app, &key[..n])).or_default() += v.max(0.);
             }
         }
+        let out = agg(es);
+
         Some(out)
     }
 }
@@ -133,28 +126,31 @@ impl Drop for G {
         }
     }
 }
-pub fn sum(m: &M, ids: &HashSet<u32>) -> f64 {
-    let mut es: HashMap<&str, f64> = HashMap::new();
-    for id in ids {
-        if let Some(v) = m.get(id) {
-            for (k, n) in v {
-                *es.entry(k).or_default() += n;
-            }
-        }
+fn agg(es: HashMap<(i64, &[u16]), f64>) -> M {
+    let mut out = M::new();
+    for ((id, _), v) in es {
+        let n = out.entry(id).or_default();
+        *n = n.max(v).clamp(0., 100.);
     }
-    es.values().copied().fold(0., f64::max).clamp(0., 100.)
+    out
 }
 #[cfg(test)]
 mod t {
     #[test]
     fn eng() {
-        let m = std::collections::HashMap::from([
-            (1, vec![("a".into(), 30.), ("b".into(), 10.)]),
-            (2, vec![("a".into(), 40.), ("b".into(), 90.)]),
-        ]);
-        assert_eq!(
-            super::sum(&m, &std::collections::HashSet::from([1, 2])),
-            100.
-        );
+        let a: Vec<u16> = "engine_a".encode_utf16().collect();
+        let b: Vec<u16> = "engine_b".encode_utf16().collect();
+        let mut es = std::collections::HashMap::new();
+        for (id, k, v) in [
+            (1, a.as_slice(), 30.),
+            (1, a.as_slice(), 40.),
+            (1, b.as_slice(), 90.),
+            (2, a.as_slice(), 5.),
+        ] {
+            *es.entry((id, k)).or_default() += v;
+        }
+        let m = super::agg(es);
+        assert_eq!(m[&1], 90.);
+        assert_eq!(m[&2], 5.);
     }
 }

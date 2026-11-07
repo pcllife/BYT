@@ -52,3 +52,7 @@ PWD.txt
 **/.vscode/
 **/target/
 **/node_modules/
+
+# doc - keep the notes local
+/doc/
+**/doc/

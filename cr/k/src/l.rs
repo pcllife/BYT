@@ -1,3 +1,4 @@
+#[doc = "# asm - keep the counter bits here"]
 pub mod a;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -83,12 +84,15 @@ pub fn dir() -> PathBuf {
 
 pub fn norm(p: &Path) -> String {
     let s = p.to_string_lossy();
-    let s = if let Some(s) = s.strip_prefix(r"\\?\UNC\") {
+    let mut s = if let Some(s) = s.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{}", s)
     } else {
         s.trim_start_matches(r"\\?\").to_string()
     };
-    let mut s = s.replace('/', "\\").to_lowercase();
+    let hi = unsafe { a::p(s.as_mut_vec()) };
+    if hi {
+        s = s.to_lowercase();
+    }
     while s.ends_with('\\') && s.len() > 3 {
         s.pop();
     }

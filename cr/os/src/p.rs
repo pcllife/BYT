@@ -93,31 +93,26 @@ impl P {
             dwSize: size_of::<PROCESSENTRY32W>() as u32,
             ..Default::default()
         };
+        let names: Vec<Vec<u16>> = apps
+            .iter()
+            .filter(|a| a.on)
+            .filter_map(|a| Path::new(&a.ex).file_name())
+            .map(|n| n.to_string_lossy().encode_utf16().collect())
+            .collect();
         let mut rows = Vec::with_capacity(256);
         let mut b = unsafe { Process32FirstW(sn.0, &mut pe) };
         while b != 0 {
-            let n = pe
-                .szExeFile
-                .iter()
-                .position(|v| *v == 0)
-                .unwrap_or(pe.szExeFile.len());
-            rows.push((
-                pe.th32ProcessID,
-                pe.th32ParentProcessID,
-                String::from_utf16_lossy(&pe.szExeFile[..n]).to_lowercase(),
-            ));
+            let n = a::w(&pe.szExeFile);
+            let hit = names.iter().any(|nm| a::e(&pe.szExeFile[..n], nm));
+            rows.push((pe.th32ProcessID, pe.th32ParentProcessID, hit));
             b = unsafe { Process32NextW(sn.0, &mut pe) };
         }
-        for (pid, _, nm) in &rows {
+        for (pid, _, hit) in &rows {
             if let Some(e) = self.es.get(pid) {
                 self.ids.insert(*pid, e.id);
                 continue;
             }
-            if !apps.iter().any(|a| {
-                a.on && Path::new(&a.ex)
-                    .file_name()
-                    .is_some_and(|v| v.to_string_lossy().eq_ignore_ascii_case(nm))
-            }) {
+            if !hit {
                 continue;
             }
             let Some(h) = handle(*pid) else {

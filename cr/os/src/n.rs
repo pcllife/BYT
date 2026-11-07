@@ -12,6 +12,7 @@ pub struct B {
     ids: RwLock<HashMap<u32, i64>>,
     cnt: Mutex<HashMap<i64, (u64, u64)>>,
 }
+#[doc = "# net - only count bytes for our pids"]
 pub struct N {
     h: CONTROLTRACE_HANDLE,
     p: Vec<u64>,

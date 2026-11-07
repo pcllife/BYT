@@ -8,7 +8,7 @@ use byt_os::{
 };
 use rusqlite::params;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     hash::{Hash, Hasher},
     os::windows::process::CommandExt,
     path::Path,
@@ -27,6 +27,7 @@ pub fn spawn(p: &Path) -> R<()> {
         .spawn()?;
     Ok(())
 }
+#[doc = "# bg - one loop for each data dir"]
 pub fn run(p: &Path, ticks: Option<u64>) -> R<()> {
     let mut hs = std::collections::hash_map::DefaultHasher::new();
     d::norm(p).hash(&mut hs);
@@ -105,13 +106,7 @@ pub fn run(p: &Path, ticks: Option<u64>) -> R<()> {
                         s.cm = a::a(s.cm, dt);
                     }
                     if let Some(gs) = &gs {
-                        let ids: HashSet<_> = pr
-                            .ids
-                            .iter()
-                            .filter(|(_, id)| **id == ap.id)
-                            .map(|(p, _)| *p)
-                            .collect();
-                        let g = byt_os::g::sum(gs, &ids);
+                        let g = gs.get(&ap.id).copied().unwrap_or(0.);
                         s.g = Some(g);
                         s.gs += g * dt as f64;
                         s.gm = a::a(s.gm, dt);

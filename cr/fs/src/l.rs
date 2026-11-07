@@ -220,6 +220,7 @@ impl F {
         Ok(())
     }
 }
+#[doc = "# fs - watch changes, skip the busy scanning"]
 pub struct W {
     pub tx: SyncSender<Vec<A>>,
     quit: Arc<AtomicBool>,

@@ -1,4 +1,4 @@
-# UP
+# up - check first, then ship
 param([string]$Msg = 'split ws; ui/bg/os/fs/db do their own thing')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)

@@ -1,6 +1,7 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 use byt_bg as b;
 use byt_db as d;
+mod t;
 mod u;
 fn run(p: &std::path::Path) -> d::R<()> {
     let a: Vec<_> = std::env::args().collect();
