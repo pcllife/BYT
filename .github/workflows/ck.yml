@@ -1,0 +1,16 @@
+name: ck
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  win:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - shell: pwsh
+        run: ./ops/ck.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: byt-win-x64
+          path: target/release/byt.exe

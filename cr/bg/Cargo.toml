@@ -1,0 +1,17 @@
+[package]
+name = "byt-bg"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/l.rs"
+
+[dependencies]
+byt-k.workspace = true
+byt-db.workspace = true
+byt-os.workspace = true
+byt-fs.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+windows-sys.workspace = true
