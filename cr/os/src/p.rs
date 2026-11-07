@@ -123,7 +123,9 @@ impl P {
             if unsafe { QueryFullProcessImageNameW(h.0, 0, path.as_mut_ptr(), &mut len) } == 0 {
                 continue;
             }
-            let ex = d::norm(Path::new(&String::from_utf16_lossy(&path[..len as usize])));
+            let raw = String::from_utf16_lossy(&path[..len as usize]);
+            let px = Path::new(&raw);
+            let ex = d::norm(&px.canonicalize().unwrap_or_else(|_| px.to_path_buf()));
             let Some(ap) = apps.iter().find(|a| a.on && a.ex == ex) else {
                 continue;
             };

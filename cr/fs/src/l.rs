@@ -151,9 +151,7 @@ impl F {
                 }
             }
             Err(e) => {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    self.rm(&ps, true);
-                } else {
+                if e.kind() != std::io::ErrorKind::NotFound {
                     self.z.err += 1;
                 }
             }
@@ -171,6 +169,9 @@ impl F {
                 .filter(|(p, _)| under(p, &s))
                 .map(|(p, n)| (p.clone(), *n))
                 .collect();
+            if s != t && !ps.is_empty() {
+                self.rm(&t, true);
+            }
             for (p, n) in ps {
                 let np = format!("{}{}", t, &p[s.len()..]);
                 self.set(p, None, false);
@@ -373,7 +374,11 @@ fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
                             f.mv(&e.paths[0], &e.paths[1]);
                         } else {
                             for p in &e.paths {
-                                f.upd(p);
+                                if matches!(e.kind, EventKind::Remove(_)) {
+                                    f.rm(&d::norm(p), true);
+                                } else {
+                                    f.upd(p);
+                                }
                             }
                         }
                     }
@@ -389,7 +394,7 @@ fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
             if rn[j].1.elapsed() > Duration::from_millis(500) {
                 let (p, _) = rn.remove(j);
                 for f in fs.values_mut().filter(|f| f.a.on) {
-                    f.upd(&p);
+                    f.rm(&d::norm(&p), true);
                 }
             } else {
                 j += 1;
@@ -412,7 +417,7 @@ fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
     }
     for (p, _) in rn {
         for f in fs.values_mut().filter(|f| f.a.on) {
-            f.upd(&p);
+            f.rm(&d::norm(&p), true);
         }
     }
     for f in fs.values_mut() {
@@ -462,5 +467,35 @@ mod t {
         f.mv(Path::new(r"c:\a\old"), Path::new(r"c:\a\new"));
         assert_eq!(f.z.ad, 0);
         assert!(f.m.contains_key(r"c:\a\new\x"));
+    }
+}
+
+#[cfg(test)]
+mod repl {
+    use super::*;
+    #[test]
+    fn sizes() {
+        for (old, new) in [(100, 60), (60, 100)] {
+            let mut f = F {
+                a: A {
+                    id: 1,
+                    nm: String::new(),
+                    ex: String::new(),
+                    ds: vec![r"c:\a".into()],
+                    ts: 0,
+                    on: true,
+                },
+                z: Z::default(),
+                m: M::new(),
+                dx: HashMap::new(),
+                base: false,
+            };
+            f.set(r"c:\a\dst".into(), Some(old), false);
+            f.set(r"c:\a\tmp".into(), Some(new), true);
+            for _ in 0..2 {
+                f.mv(Path::new(r"c:\a\tmp"), Path::new(r"c:\a\dst"));
+                assert_eq!((f.z.sz, f.z.ad, f.z.rm, f.z.cnt), (new, new, old, 1));
+            }
+        }
     }
 }
