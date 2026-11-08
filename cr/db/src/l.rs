@@ -6,7 +6,17 @@ pub fn open(p: &Path) -> R<Connection> {
     std::fs::create_dir_all(p)?;
     let c = Connection::open(p.join("d.db"))?;
     c.busy_timeout(Duration::from_secs(5))?;
-    c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON;
+    c.set_prepared_statement_cache_capacity(6);
+    unsafe {
+        rusqlite::ffi::sqlite3_db_config(
+            c.handle(),
+            rusqlite::ffi::SQLITE_DBCONFIG_LOOKASIDE,
+            std::ptr::null_mut::<std::ffi::c_void>(),
+            0i32,
+            0i32,
+        );
+    }
+    c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA foreign_keys=ON; PRAGMA cache_size=-64; PRAGMA temp_store=FILE; PRAGMA mmap_size=0;
         CREATE TABLE IF NOT EXISTS a(id INTEGER PRIMARY KEY,nm TEXT NOT NULL,ex TEXT NOT NULL UNIQUE,ds TEXT NOT NULL,ts INTEGER NOT NULL,en INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS s(id INTEGER PRIMARY KEY REFERENCES a(id) ON DELETE CASCADE,v TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS z(id INTEGER PRIMARY KEY REFERENCES a(id) ON DELETE CASCADE,v TEXT NOT NULL);

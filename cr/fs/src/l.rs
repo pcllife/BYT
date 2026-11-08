@@ -10,7 +10,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, Receiver, SyncSender},
     },
     thread::JoinHandle,
@@ -190,6 +190,12 @@ impl F {
         }
     }
     fn save(&mut self, c: &mut Connection) -> R<()> {
+        let mut paths: Vec<_> = if self.base {
+            self.m.keys().collect()
+        } else {
+            self.dx.keys().collect()
+        };
+        paths.sort_unstable();
         let tx = c.transaction()?;
         if self.base {
             tx.execute("DELETE FROM f WHERE id=?1", [self.a.id])?;
@@ -197,17 +203,16 @@ impl F {
         {
             let mut put=tx.prepare_cached("INSERT INTO f(id,p,n) VALUES(?1,?2,?3) ON CONFLICT(id,p) DO UPDATE SET n=excluded.n")?;
             let mut del = tx.prepare_cached("DELETE FROM f WHERE id=?1 AND p=?2")?;
-            if self.base {
-                for (p, n) in &self.m {
+            for p in paths {
+                let n = if self.base {
+                    Some(self.m[p])
+                } else {
+                    self.dx[p]
+                };
+                if let Some(n) = n {
                     put.execute(params![self.a.id, p, n])?;
-                }
-            } else {
-                for (p, n) in &self.dx {
-                    if let Some(n) = n {
-                        put.execute(params![self.a.id, p, n])?;
-                    } else {
-                        del.execute(params![self.a.id, p])?;
-                    }
+                } else {
+                    del.execute(params![self.a.id, p])?;
                 }
             }
         }
@@ -218,6 +223,12 @@ impl F {
         tx.commit()?;
         self.base = false;
         self.dx.clear();
+        if self.dx.capacity() > 1024 {
+            self.dx.shrink_to(256);
+        }
+        if self.m.capacity() > self.m.len().saturating_mul(4).max(1024) {
+            self.m.shrink_to(self.m.len().max(256));
+        }
         Ok(())
     }
 }
@@ -256,11 +267,23 @@ impl Drop for W {
 }
 fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
     let mut c = d::open(&p)?;
-    let (et, er) = mpsc::sync_channel::<notify::Result<Event>>(4096);
+    let (et, er) = mpsc::channel::<notify::Result<Event>>();
+    let pending = Arc::new(AtomicUsize::new(0));
+    let pc = pending.clone();
     let of = Arc::new(AtomicBool::new(false));
     let of2 = of.clone();
     let mut w = notify::recommended_watcher(move |e| {
-        if et.try_send(e).is_err() {
+        if pc
+            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |v| {
+                (v < 4096).then_some(v + 1)
+            })
+            .is_err()
+        {
+            of2.store(true, Ordering::Relaxed);
+            return;
+        }
+        if et.send(e).is_err() {
+            pc.fetch_sub(1, Ordering::AcqRel);
             of2.store(true, Ordering::Relaxed);
         }
     })?;
@@ -334,6 +357,7 @@ fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
         }
         match er.recv_timeout(Duration::from_millis(250)) {
             Ok(Ok(e)) => {
+                pending.fetch_sub(1, Ordering::AcqRel);
                 if e.need_rescan() {
                     of.store(true, Ordering::Relaxed);
                 }
@@ -385,6 +409,7 @@ fn run(p: PathBuf, cfg: Receiver<Vec<A>>, quit: Arc<AtomicBool>) -> R<()> {
                 }
             }
             Ok(Err(_)) => {
+                pending.fetch_sub(1, Ordering::AcqRel);
                 of.store(true, Ordering::Relaxed);
             }
             _ => {}

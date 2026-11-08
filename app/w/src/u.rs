@@ -399,6 +399,12 @@ impl U {
             tt: 0,
             er: None,
         };
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&d::val(&u.c, "ui")) {
+            u.sel = v["sel"].as_u64().unwrap_or(0) as usize;
+            u.off = v["off"].as_u64().unwrap_or(0) as usize;
+            u.di = v["di"].as_u64().unwrap_or(0) as usize;
+            u.doff = v["doff"].as_u64().unwrap_or(0) as usize;
+        }
         u.load(true)?;
         Ok(u)
     }
@@ -845,12 +851,17 @@ impl U {
                             }
                             std::thread::sleep(std::time::Duration::from_millis(250));
                         }
-                        if let Ok(ex) = std::env::current_exe() {
+                        if let (Ok(ex), Ok(ui)) = (b::entry(), std::env::current_exe()) {
                             ShellExecuteW(
                                 null_mut(),
                                 w!("runas"),
                                 wz(&ex.to_string_lossy()).as_ptr(),
-                                wz(&format!("--bg --data \"{}\"", p.display())).as_ptr(),
+                                wz(&format!(
+                                    "--bg --data \"{}\" --ui \"{}\"",
+                                    p.display(),
+                                    ui.display()
+                                ))
+                                .as_ptr(),
                                 null(),
                                 SW_HIDE,
                             );
@@ -906,11 +917,20 @@ unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
             }
             match m {
                 WM_CREATE => {
-                    u.tr = Some(t::T::new(h));
+                    if !t::ready(&u.p) {
+                        u.tr = Some(t::T::new(h));
+                    }
                     SetTimer(h, 1, 2000, None);
                     return 0;
                 }
                 WM_CLOSE => {
+                    if t::ready(&u.p) {
+                        PostMessageW(h, t::Q, 0, 0);
+                        return 0;
+                    }
+                    if u.tr.is_none() {
+                        u.tr = Some(t::T::new(h));
+                    }
                     let ok = u.tr.as_mut().is_some_and(t::T::ready);
                     if ok {
                         KillTimer(h, 1);
@@ -1076,6 +1096,14 @@ unsafe extern "system" fn wp(h: HWND, m: u32, w: WPARAM, l: LPARAM) -> LRESULT {
                     return 0;
                 }
                 WM_DESTROY => {
+                    let mut wp = WINDOWPLACEMENT {
+                        length: size_of::<WINDOWPLACEMENT>() as u32,
+                        ..Default::default()
+                    };
+                    if GetWindowPlacement(h, &mut wp) != 0 {
+                        let r = wp.rcNormalPosition;
+                        let _=d::kv(&u.c,"ui",&serde_json::json!({"sel":u.sel,"off":u.off,"di":u.di,"doff":u.doff,"x":r.left,"y":r.top,"w":r.right-r.left,"h":r.bottom-r.top}).to_string());
+                    }
                     u.tr.take();
                     KillTimer(h, 2);
                     KillTimer(h, 1);
@@ -1112,15 +1140,19 @@ pub fn run(p: &Path) -> R<()> {
             ..Default::default()
         };
         RegisterClassW(&wc);
+        let v = serde_json::from_str::<serde_json::Value>(&d::val(&u.c, "ui")).unwrap_or_default();
         let h = CreateWindowExW(
             0,
             cls.as_ptr(),
             w!("BYT"),
             WS_OVERLAPPEDWINDOW | WS_VISIBLE,
-            CW_USEDEFAULT,
-            CW_USEDEFAULT,
-            1260,
-            840,
+            v["x"].as_i64().map(|v| v as i32).unwrap_or(CW_USEDEFAULT),
+            v["y"].as_i64().map(|v| v as i32).unwrap_or(CW_USEDEFAULT),
+            v["w"]
+                .as_i64()
+                .map(|v| (v as i32).max(1180))
+                .unwrap_or(1260),
+            v["h"].as_i64().map(|v| (v as i32).max(780)).unwrap_or(840),
             null_mut(),
             null_mut(),
             ins,

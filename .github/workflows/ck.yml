@@ -13,4 +13,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: byt-win-x64
-          path: target/release/byt.exe
+          path: |
+            target/release/byt.exe
+            target/release/bg.exe

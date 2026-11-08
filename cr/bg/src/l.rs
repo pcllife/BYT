@@ -1,3 +1,4 @@
+pub mod t;
 use byt_db::{self as d, R, S};
 use byt_fs::W;
 use byt_k::a;
@@ -16,15 +17,35 @@ use std::{
     time::Duration,
 };
 use windows_sys::Win32::{Foundation::*, System::Threading::*};
+pub fn side() -> Option<std::path::PathBuf> {
+    let ex = std::env::current_exe().ok()?;
+    let p = ex.parent()?.join("bg.exe");
+    p.is_file().then_some(p)
+}
+pub fn entry() -> R<std::path::PathBuf> {
+    Ok(side().unwrap_or(std::env::current_exe()?))
+}
 pub fn spawn(p: &Path) -> R<()> {
-    Command::new(std::env::current_exe()?)
-        .args(["--bg", "--data"])
-        .arg(p)
-        .stdin(Stdio::null())
+    let ex = std::env::current_exe()?;
+    let side = side();
+    let mut c = Command::new(side.as_ref().unwrap_or(&ex));
+    c.args(["--bg", "--data"]).arg(p);
+    if side.is_some() {
+        c.arg("--ui").arg(&ex);
+    }
+    c.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .creation_flags(CREATE_NO_WINDOW)
         .spawn()?;
+    if side.is_some() {
+        for _ in 0..100 {
+            if !t::win(p, true).is_null() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
     Ok(())
 }
 #[doc = "# bg - one loop for each data dir"]
@@ -53,6 +74,23 @@ pub fn run(p: &Path, ticks: Option<u64>) -> R<()> {
     let mut cfg = String::new();
     let mut n = 0u64;
     let mut prev = p::clock();
+    let exe = std::env::current_exe()?;
+    let own = d::norm(&exe);
+    let args: Vec<_> = std::env::args_os().collect();
+    let host = if exe
+        .file_name()
+        .is_some_and(|v| v.eq_ignore_ascii_case("bg.exe"))
+    {
+        args.iter()
+            .position(|a| a == "--ui")
+            .and_then(|i| args.get(i + 1))
+            .map(|p| {
+                let p = std::path::PathBuf::from(p);
+                d::norm(&p.canonicalize().unwrap_or(p))
+            })
+    } else {
+        None
+    };
     loop {
         let at = std::time::Instant::now();
         let now = d::now();
@@ -71,7 +109,17 @@ pub fn run(p: &Path, ticks: Option<u64>) -> R<()> {
         if !apps.iter().any(|a| a.on) {
             net = None;
         }
-        let ps = pr.read(&apps);
+        let mut roots = Vec::new();
+        if let Some(host) = &host
+            && !apps.iter().any(|a| a.ex == own)
+            && let Some(a) = apps.iter().find(|a| a.on && a.ex == *host)
+        {
+            let mut a = a.clone();
+            a.ex = own.clone();
+            roots = apps.clone();
+            roots.push(a);
+        }
+        let ps = pr.read(if roots.is_empty() { &apps } else { &roots });
         if let Some(net) = &net {
             net.ids(&pr.ids);
         }
@@ -162,7 +210,7 @@ pub fn run(p: &Path, ticks: Option<u64>) -> R<()> {
             &tx,
             "gpu",
             if gs.is_some() {
-                "PDH"
+                gpu.kind
             } else if pr.ids.is_empty() {
                 "IDLE"
             } else {

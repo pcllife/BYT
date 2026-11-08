@@ -7,7 +7,12 @@ fn run(p: &std::path::Path) -> d::R<()> {
     let a: Vec<_> = std::env::args().collect();
     let arg = |k: &str| a.iter().position(|s| s == k).and_then(|i| a.get(i + 1));
     if a.iter().any(|s| s == "--bg") {
-        return b::run(p, arg("--ticks").and_then(|v| v.parse().ok()));
+        let ticks = arg("--ticks").and_then(|v| v.parse().ok());
+        return if ticks.is_none() && b::side().is_some() {
+            b::spawn(p)
+        } else {
+            b::run(p, ticks)
+        };
     }
     let c = d::open(p)?;
     if a.iter().any(|s| s == "--stop") {

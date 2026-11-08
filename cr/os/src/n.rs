@@ -108,11 +108,16 @@ impl N {
             (*p).Wnode.BufferSize = sz as u32;
             (*p).Wnode.Flags = WNODE_FLAG_TRACED_GUID;
             let mut guid = windows_sys::core::GUID::from_u128(0);
-            let hr = windows_sys::Win32::System::Com::CoCreateGuid(&mut guid);
-            if hr < 0 {
-                n.err = hr as u32;
+            if windows_sys::Win32::Security::Cryptography::ProcessPrng(
+                (&mut guid as *mut windows_sys::core::GUID).cast(),
+                size_of::<windows_sys::core::GUID>(),
+            ) == 0
+            {
+                n.err = 31;
                 return n;
             }
+            guid.data3 = (guid.data3 & 0x0fff) | 0x4000;
+            guid.data4[0] = (guid.data4[0] & 0x3f) | 0x80;
             (*p).Wnode.Guid = guid;
             (*p).Wnode.ClientContext = 1;
             (*p).BufferSize = 16;

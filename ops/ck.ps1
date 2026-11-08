@@ -1,17 +1,29 @@
 # ck - run the lot before a push
+param([string]$Out = 'target')
 $ErrorActionPreference = 'Stop'
 Set-Location (Split-Path $PSScriptRoot -Parent)
+$Out = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path (Get-Location) $Out }
+$prev = $env:CARGO_TARGET_DIR
+$env:CARGO_TARGET_DIR = $Out
+try {
+foreach ($file in @('ck.ps1','up.ps1')) {
+    $tokens = $null; $errors = $null
+    [Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot $file),[ref]$tokens,[ref]$errors) | Out-Null
+    if ($errors.Count) { throw ('ps parse ' + $file + ': ' + ($errors -join '; ')) }
+}
 function c($a) {
     & cargo @a
     if ($LASTEXITCODE -ne 0) { throw "cargo $($a -join ' ')" }
 }
 c @('fmt','--all','--','--check')
 c @('clippy','--workspace','--all-targets','--locked','--','-D','warnings')
+c @('build','--workspace','--locked')
 c @('test','--workspace','--locked','--','--test-threads=1')
 c @('build','--release','--workspace','--locked')
 & git diff --check -- .gitattributes .gitignore Cargo.toml Cargo.lock app cr res ops .github
 if ($LASTEXITCODE -ne 0) { throw 'diff' }
-$e = (Resolve-Path 'target/release/byt.exe').Path
+$e = (Resolve-Path (Join-Path $Out 'release/byt.exe')).Path
+if (!(Test-Path -LiteralPath (Join-Path $Out 'release/bg.exe'))) { throw 'bg exe' }
 $p = Join-Path ([IO.Path]::GetTempPath()) ('byt_ck_' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path (Join-Path $p 'files') -Force | Out-Null
 function xr($a) {
@@ -45,3 +57,5 @@ try {
 # IDX
 $ok = '^(\.gitignore|\.gitattributes|Cargo\.toml|Cargo\.lock|LICENSE|app/.*(?:\.rs|/Cargo\.toml)|cr/.*(?:\.rs|\.s|\.asm|/Cargo\.toml)|ops/(?:ck|up)\.ps1|\.github/workflows/[^/]+\.ya?ml|res/(?:f\.ttf|ofl\.txt))$'
 & git ls-files | ForEach-Object { if ($_ -notmatch $ok) { throw ('blocked: ' + $_) } }
+
+} finally { $env:CARGO_TARGET_DIR = $prev }
